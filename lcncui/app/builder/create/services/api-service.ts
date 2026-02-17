@@ -85,4 +85,9 @@ export const apiService = {
     if (!res.ok) throw new Error("Failed to delete relationship");
     return true;
   },
+  getRelationships: async (): Promise<DataRelationship[]> => {
+    const res = await fetch(`${BASE_URL}/relationships`, { headers: getHeaders() });
+    if (!res.ok) throw new Error("Failed to load relationships");
+    return res.json();
+  },
 };

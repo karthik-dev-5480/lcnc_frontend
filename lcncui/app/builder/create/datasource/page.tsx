@@ -25,14 +25,15 @@ const INITIAL_COLUMN_STATE: DataColumn = {
 
 const INITIAL_RELATION_STATE = {
   sourceTableId: "",
-  sourceColumnId: "", // Changed from sourceColumn
+  sourceColumnId: "", 
   targetTableId: "",
-  targetColumnId: ""  // Changed from targetColumn
+  targetColumnId: ""  
 };
 
 export default function DataModeler() {
   // --- UI & Data State ---
   const [tables, setTables] = useState<DataTable[]>([]);
+  const [relationships, setRelationships] = useState<DataRelationship[]>([]); 
   const [selectedTableId, setSelectedTableId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -44,54 +45,26 @@ export default function DataModeler() {
   const [tableName, setTableName] = useState("");
   const [tableDescription, setTableDescription] = useState(""); 
   const [columnData, setColumnData] = useState<DataColumn>(INITIAL_COLUMN_STATE);
-
   const [relationData, setRelationData] = useState(INITIAL_RELATION_STATE);
 
-  // Helper to get columns for a specific table ID
+  // --- Helper: Get Table Name ---
+  const getTableName = (id: number | string | null | undefined) => {
+    // 1. Safety check: If the ID passed in is null/undefined
+    if (!id) return "Unknown";
+
+    // 2. Find table: Ensure table exists and has an ID before comparing
+    const foundTable = tables.find(t => 
+      t && t.id && t.id.toString() === id.toString()
+    );
+
+    return foundTable?.tableName || "Unknown";
+  };
+
+  // --- Helper: Get Columns ---
   const getColumnsForTable = (tableId: string) => {
     const table = tables.find(t => t.id.toString() === tableId.toString());
     return table?.columns || [];
   };
-
-const handleMapRelationship = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // 1. Strict Validation
-  if (!relationData.sourceTableId || !relationData.sourceColumnId || 
-      !relationData.targetTableId || !relationData.targetColumnId) {
-      showToast("Please select all fields", "error");
-      return;
-  }
-
-  // 2. Fetch Table Objects for Naming (Safe check)
-  const sourceT = tables.find(t => t.id.toString() === relationData.sourceTableId);
-  const targetT = tables.find(t => t.id.toString() === relationData.targetTableId);
-
-  if (!sourceT || !targetT) {
-    showToast("Invalid table selection", "error");
-    return;
-  }
-
-  // 3. Construct Payload
-  const payload = {
-    fkName: `FK_${sourceT.tableName}_${targetT.tableName}`,
-    sourceTableId: parseInt(relationData.sourceTableId, 10),
-    sourceColumnId: parseInt(relationData.sourceColumnId, 10),
-    targetTableId: parseInt(relationData.targetTableId, 10),
-    targetColumnId: parseInt(relationData.targetColumnId, 10),
-  };
-
-  console.log("Sending Payload:", payload);
-
-  try {
-    await apiService.createRelationship(payload);
-    showToast("Relationship mapped successfully", "success");
-    closeModals();
-    await loadTables(); 
-  } catch (err: any) {
-    showToast(err.message, "error");
-  }
-};
 
   const selectedTable = tables.find(t => t.id.toString() === selectedTableId);
 
@@ -102,29 +75,37 @@ const handleMapRelationship = async (e: React.FormEvent) => {
   };
 
   // --- API Actions ---
-  const loadTables = useCallback(async () => {
+
+  // Unified Data Loading (Tables + Relationships)
+  const loadData = useCallback(async () => { 
     setLoading(true);
     try {
-      const data = await apiService.getTables();
-      setTables(data);
+      const [tablesData, relData] = await Promise.all([
+        apiService.getTables(),
+        apiService.getRelationships() // Ensure this exists in your apiService
+      ]);
+      setTables(tablesData);
+      setRelationships(relData);
     } catch (err: any) {
-      showToast(err.message || "Failed to load tables", "error");
+      showToast(err.message || "Failed to load data", "error");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Initial Load
   useEffect(() => {
-    loadTables();
-  }, [loadTables]);
+    loadData();
+  }, [loadData]);
 
+  // Sync Schema
   const handleSync = async () => {
     if (!selectedTableId) return;
     setIsSyncing(true);
     try {
       const message = await apiService.syncTable(selectedTableId);
       showToast(message, "success");
-      await loadTables();
+      await loadData();
     } catch (err: any) {
       showToast(err.message || "Sync failed", "error");
     } finally {
@@ -132,17 +113,72 @@ const handleMapRelationship = async (e: React.FormEvent) => {
     }
   };
 
+  // Delete Column
   const handleDeleteColumn = async (columnId: number) => {
     if (!confirm("Are you sure you want to delete this column?")) return;
     try {
       await apiService.deleteColumn(columnId);
       showToast("Column deleted", "success");
-      await loadTables();
+      await loadData();
     } catch (err: any) {
       showToast(err.message || "Delete failed", "error");
     }
   };
 
+  // Delete Relationship
+  const handleDeleteRelation = async (relId: number) => {
+    if(!confirm("Delete this relationship?")) return;
+    try {
+        await apiService.deleteRelationship(relId);
+        showToast("Relationship deleted", "success");
+        await loadData();
+    } catch(err: any) {
+        showToast(err.message, "error");
+    }
+  };
+
+  // Map Relationship (Create)
+  const handleMapRelationship = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // 1. Strict Validation
+    if (!relationData.sourceTableId || !relationData.sourceColumnId || 
+        !relationData.targetTableId || !relationData.targetColumnId) {
+        showToast("Please select all fields", "error");
+        return;
+    }
+
+    // 2. Fetch Table Objects for Naming (Safe check)
+    const sourceT = tables.find(t => t.id.toString() === relationData.sourceTableId);
+    const targetT = tables.find(t => t.id.toString() === relationData.targetTableId);
+
+    if (!sourceT || !targetT) {
+      showToast("Invalid table selection", "error");
+      return;
+    }
+
+    // 3. Construct Payload
+    const payload = {
+      fkName: `FK_${sourceT.tableName}_${targetT.tableName}`,
+      sourceTableId: parseInt(relationData.sourceTableId, 10),
+      sourceColumnId: parseInt(relationData.sourceColumnId, 10),
+      targetTableId: parseInt(relationData.targetTableId, 10),
+      targetColumnId: parseInt(relationData.targetColumnId, 10),
+    };
+
+    console.log("Sending Payload:", payload);
+
+    try {
+      await apiService.createRelationship(payload);
+      showToast("Relationship mapped successfully", "success");
+      closeModals();
+      await loadData(); 
+    } catch (err: any) {
+      showToast(err.message, "error");
+    }
+  };
+
+  // Generic Submit Handler (Tables, Columns)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -160,7 +196,7 @@ const handleMapRelationship = async (e: React.FormEvent) => {
       }
       showToast("Operation successful", "success");
       closeModals();
-      await loadTables();
+      await loadData();
     } catch (err: any) {
       showToast(err.message || "Request failed", "error");
     }
@@ -322,9 +358,43 @@ const handleMapRelationship = async (e: React.FormEvent) => {
                 <Plus size={14} /> Add
               </button>
             </div>
-            <div className="flex-1 flex flex-col items-center justify-center opacity-20">
-               <Link2 size={40}/>
-               <p className="text-[10px] font-bold mt-4 uppercase tracking-widest">Relation mapping active</p>
+            
+            {/* RELATIONSHIP TABLE */}
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-left">
+                <thead className="bg-[#0f0f0f] text-[10px] uppercase tracking-widest text-[#444] font-bold">
+                  <tr>
+                    <th className="px-6 py-4">Source Table</th>
+                    <th className="px-6 py-4">Target Table</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#222]">
+                  {relationships.length === 0 ? (
+                    <tr><td colSpan={3} className="text-center py-10 text-[#555] text-xs">No relationships defined</td></tr>
+                  ) : (
+                    relationships.map((rel: any) => (
+                      <tr key={rel.id} className="group hover:bg-[#161616] transition-colors">
+                        <td className="px-6 py-4 text-sm text-[#888]">
+                          <span className="text-white font-medium">{getTableName(rel.sourceTableId)}</span>
+                          <span className="mx-2 text-[#444]">→</span>
+                          <span className="text-[10px] border border-[#333] px-1 rounded">FK</span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-[#888]">
+                          <span className="text-white font-medium">{getTableName(rel.targetTableId)}</span>
+                          <span className="mx-2 text-[#444]">→</span>
+                          <span className="text-[10px] border border-[#333] px-1 rounded">PK</span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button onClick={() => handleDeleteRelation(rel.id)} className="p-2 text-[#555] hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                              <Trash2 size={14}/>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
@@ -414,92 +484,91 @@ const handleMapRelationship = async (e: React.FormEvent) => {
               )}
 
               {modalMode === "relation" && (
-  <div className="space-y-6">
-    <div className="grid grid-cols-2 gap-8">
-      
-      {/* SOURCE SECTION */}
-      <div className="space-y-4 p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
-        <h3 className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Source (Foreign Key)</h3>
-        
-        <div className="space-y-2">
-          <label className="text-[10px] text-[#555] uppercase font-bold">Table</label>
-          <select 
-            value={relationData.sourceTableId}
-            disabled // Source is usually locked to the currently selected table
-            className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none opacity-50 cursor-not-allowed"
-          >
-            <option value="">Select Table...</option>
-            {tables.map(t => <option key={t.id} value={t.id.toString()}>{t.tableName}</option>)}
-          </select>
-        </div>
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-8">
+                    
+                    {/* SOURCE SECTION */}
+                    <div className="space-y-4 p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
+                      <h3 className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Source (Foreign Key)</h3>
+                      
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-[#555] uppercase font-bold">Table</label>
+                        <select 
+                          value={relationData.sourceTableId}
+                          disabled 
+                          className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none opacity-50 cursor-not-allowed"
+                        >
+                          <option value="">Select Table...</option>
+                          {tables.map(t => <option key={t.id} value={t.id.toString()}>{t.tableName}</option>)}
+                        </select>
+                      </div>
 
-        <div className="space-y-2">
-          <label className="text-[10px] text-[#555] uppercase font-bold">Column</label>
-          <select 
-            disabled={!relationData.sourceTableId}
-            value={relationData.sourceColumnId}
-            onChange={(e) => setRelationData({
-              ...relationData, 
-              sourceColumnId: e.target.value // CORRECT: Updates Source Column ID
-            })}
-            className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none disabled:opacity-30"
-          >
-            <option value="">Select Column...</option>
-            {getColumnsForTable(relationData.sourceTableId).map((col: any) => (
-              <option key={col.id} value={col.id.toString()}>{col.columnName}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-[#555] uppercase font-bold">Column</label>
+                        <select 
+                          disabled={!relationData.sourceTableId}
+                          value={relationData.sourceColumnId}
+                          onChange={(e) => setRelationData({
+                            ...relationData, 
+                            sourceColumnId: e.target.value 
+                          })}
+                          className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none disabled:opacity-30"
+                        >
+                          <option value="">Select Column...</option>
+                          {getColumnsForTable(relationData.sourceTableId).map((col: any) => (
+                            <option key={col.id} value={col.id.toString()}>{col.columnName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
 
-      {/* TARGET SECTION */}
-      <div className="space-y-4 p-4 bg-purple-500/5 rounded-2xl border border-purple-500/10">
-        <h3 className="text-[10px] font-bold text-purple-500 uppercase tracking-widest">Target (Primary Key)</h3>
-        
-        <div className="space-y-2">
-          <label className="text-[10px] text-[#555] uppercase font-bold">Table</label>
-          <select 
-            value={relationData.targetTableId}
-            onChange={(e) => setRelationData({
-              ...relationData, 
-              targetTableId: e.target.value, // CORRECT: Updates Target Table ID
-              targetColumnId: "" // Reset column when table changes
-            })}
-            className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none"
-          >
-            <option value="">Select Table...</option>
-            {tables.map(t => <option key={t.id} value={t.id.toString()}>{t.tableName}</option>)}
-          </select>
-        </div>
+                    {/* TARGET SECTION */}
+                    <div className="space-y-4 p-4 bg-purple-500/5 rounded-2xl border border-purple-500/10">
+                      <h3 className="text-[10px] font-bold text-purple-500 uppercase tracking-widest">Target (Primary Key)</h3>
+                      
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-[#555] uppercase font-bold">Table</label>
+                        <select 
+                          value={relationData.targetTableId}
+                          onChange={(e) => setRelationData({
+                            ...relationData, 
+                            targetTableId: e.target.value, 
+                            targetColumnId: "" 
+                          })}
+                          className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none"
+                        >
+                          <option value="">Select Table...</option>
+                          {tables.map(t => <option key={t.id} value={t.id.toString()}>{t.tableName}</option>)}
+                        </select>
+                      </div>
 
-        <div className="space-y-2">
-          <label className="text-[10px] text-[#555] uppercase font-bold">Column</label>
-          <select 
-            disabled={!relationData.targetTableId}
-            value={relationData.targetColumnId} 
-            onChange={(e) => setRelationData({
-              ...relationData, 
-              targetColumnId: e.target.value // CORRECT: Updates Target Column ID
-            })}
-            className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none disabled:opacity-30"
-          >
-            <option value="">Select Column...</option>
-            {/* Helper function safely gets columns based on selected Target Table ID */}
-            {getColumnsForTable(relationData.targetTableId).map((col: any) => (
-              <option key={col.id} value={col.id.toString()}>{col.columnName}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-    </div>
-    
-    <div className="flex justify-center py-2">
-        <div className="p-2 bg-[#222] rounded-full text-[#555]">
-            <Link2 size={20} />
-        </div>
-    </div>
-  </div>
-)}
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-[#555] uppercase font-bold">Column</label>
+                        <select 
+                          disabled={!relationData.targetTableId}
+                          value={relationData.targetColumnId} 
+                          onChange={(e) => setRelationData({
+                            ...relationData, 
+                            targetColumnId: e.target.value 
+                          })}
+                          className="w-full bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-3 text-sm text-white outline-none disabled:opacity-30"
+                        >
+                          <option value="">Select Column...</option>
+                          {getColumnsForTable(relationData.targetTableId).map((col: any) => (
+                            <option key={col.id} value={col.id.toString()}>{col.columnName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-center py-2">
+                      <div className="p-2 bg-[#222] rounded-full text-[#555]">
+                          <Link2 size={20} />
+                      </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-4 pt-4 border-t border-[#222]">
                 <button type="button" onClick={closeModals} className="flex-1 py-4 text-sm font-bold text-[#555] hover:text-white transition-all">Cancel</button>
