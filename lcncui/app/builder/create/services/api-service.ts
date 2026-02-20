@@ -90,4 +90,9 @@ export const apiService = {
     if (!res.ok) throw new Error("Failed to load relationships");
     return res.json();
   },
+  getTableRelationships: async (tableId: string): Promise<DataRelationship[]> => {
+  const res = await fetch(`${BASE_URL}/table/relationships/${tableId}`, { headers: getHeaders() });
+  if (!res.ok) throw new Error("Failed to load table relationships");
+  return res.json();
+},
 };

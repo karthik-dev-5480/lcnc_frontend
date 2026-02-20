@@ -46,6 +46,46 @@ export default function DataModeler() {
   const [tableDescription, setTableDescription] = useState(""); 
   const [columnData, setColumnData] = useState<DataColumn>(INITIAL_COLUMN_STATE);
   const [relationData, setRelationData] = useState(INITIAL_RELATION_STATE);
+  // 1. Fetch Tables (Only runs once on mount, or when explicitly called)
+const loadTables = useCallback(async () => { 
+  setLoading(true);
+  try {
+    const tablesData = await apiService.getTables();
+    setTables(tablesData);
+  } catch (err: any) {
+    showToast(err.message || "Failed to load tables", "error");
+  } finally {
+    setLoading(false);
+  }
+}, []);
+
+// 2. Fetch Relationships (Runs whenever selectedTableId changes)
+const loadRelationships = useCallback(async () => {
+  if (!selectedTableId) {
+    setRelationships([]); // Clear relationships if no table is selected
+    return;
+  }
+  try {
+    const relData = await apiService.getTableRelationships(selectedTableId);
+    setRelationships(relData);
+  } catch (err: any) {
+    showToast(err.message || "Failed to load relationships", "error");
+  }
+}, [selectedTableId]);
+
+// Initial Table Load
+useEffect(() => {
+  loadTables();
+}, [loadTables]);
+
+// Table Selection Listener
+useEffect(() => {
+  if (selectedTableId) {
+    loadRelationships(); // Fetches GET /api/data/table/relationships/{id}
+  } else {
+    setRelationships([]);
+  }
+}, [selectedTableId, loadRelationships]);
 
   // --- Helper: Get Table Name ---
   const getTableName = (id: number | string | null | undefined) => {
@@ -131,7 +171,7 @@ export default function DataModeler() {
     try {
         await apiService.deleteRelationship(relId);
         showToast("Relationship deleted", "success");
-        await loadData();
+        await loadRelationships();
     } catch(err: any) {
         showToast(err.message, "error");
     }
@@ -172,7 +212,7 @@ export default function DataModeler() {
       await apiService.createRelationship(payload);
       showToast("Relationship mapped successfully", "success");
       closeModals();
-      await loadData(); 
+      await loadRelationships(); 
     } catch (err: any) {
       showToast(err.message, "error");
     }
@@ -285,119 +325,141 @@ export default function DataModeler() {
         )}
 
         {/* GRIDS SECTION */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Columns Grid */}
-          <section className="bg-[#111] border border-[#222] rounded-[32px] overflow-hidden flex flex-col shadow-2xl min-h-[450px]">
-            <div className="p-6 border-b border-[#222] flex justify-between items-center bg-[#161616]/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500"><Columns size={18} /></div>
-                <h2 className="font-bold tracking-tight">Columns</h2>
-              </div>
-              <button 
-                onClick={() => setModalMode("column")} 
-                disabled={!selectedTableId} 
-                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-xs font-bold rounded-xl hover:bg-white/10 transition-all disabled:opacity-30"
-              >
-                <Plus size={14} /> Add
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left">
-                <thead className="bg-[#0f0f0f] text-[10px] uppercase tracking-widest text-[#444] font-bold">
-                  <tr>
-                    <th className="px-6 py-4">Name</th>
-                    <th className="px-6 py-4">Type</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#222]">
-                  {selectedTable?.columns?.map((col: DataColumn) => (
-                    <tr key={col.id} className="group hover:bg-[#161616] transition-colors">
-                      <td className="px-6 py-4 text-sm font-medium">
-                        {col.columnName}
-                        {col.isPrimaryKey && <span className="ml-2 text-[8px] text-yellow-500 border border-yellow-500/30 px-1 rounded uppercase">PK</span>}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-[10px] bg-[#222] px-2 py-1 rounded text-[#888] font-mono">
-                          {col.dataType}{col.length ? `(${col.length})` : ''}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => handleEditColumn(col)} className="p-2 text-[#555] hover:text-white transition-colors">
-                            <Edit2 size={14}/>
-                          </button>
-                          <button onClick={() => col.id && handleDeleteColumn(col.id)} className="p-2 text-[#555] hover:text-red-500 transition-colors">
-                            <Trash2 size={14}/>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!selectedTableId && <div className="h-full flex flex-col items-center justify-center p-10 opacity-20"><Columns size={40}/><p className="text-[10px] font-bold mt-4 uppercase tracking-widest">Select a table to begin</p></div>}
-            </div>
-          </section>
-
-          {/* Relationships Grid */}
-          <section className="bg-[#111] border border-[#222] rounded-[32px] overflow-hidden flex flex-col shadow-2xl min-h-[450px]">
-            <div className="p-6 border-b border-[#222] flex justify-between items-center bg-[#161616]/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Link2 size={18} /></div>
-                <h2 className="font-bold tracking-tight">Relationships</h2>
-              </div>
-              <button 
-                onClick={() => {
-                  setRelationData(prev => ({ ...prev, sourceTableId: selectedTableId }));
-                  setModalMode("relation");
-                }} 
-                disabled={!selectedTableId} 
-                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-xs font-bold rounded-xl hover:bg-white/10 transition-all disabled:opacity-30"
-              >
-                <Plus size={14} /> Add
-              </button>
-            </div>
-            
-            {/* RELATIONSHIP TABLE */}
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left">
-                <thead className="bg-[#0f0f0f] text-[10px] uppercase tracking-widest text-[#444] font-bold">
-                  <tr>
-                    <th className="px-6 py-4">Source Table</th>
-                    <th className="px-6 py-4">Target Table</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#222]">
-                  {relationships.length === 0 ? (
-                    <tr><td colSpan={3} className="text-center py-10 text-[#555] text-xs">No relationships defined</td></tr>
-                  ) : (
-                    relationships.map((rel: any) => (
-                      <tr key={rel.id} className="group hover:bg-[#161616] transition-colors">
-                        <td className="px-6 py-4 text-sm text-[#888]">
-                          <span className="text-white font-medium">{getTableName(rel.sourceTableId)}</span>
-                          <span className="mx-2 text-[#444]">→</span>
-                          <span className="text-[10px] border border-[#333] px-1 rounded">FK</span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-[#888]">
-                          <span className="text-white font-medium">{getTableName(rel.targetTableId)}</span>
-                          <span className="mx-2 text-[#444]">→</span>
-                          <span className="text-[10px] border border-[#333] px-1 rounded">PK</span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button onClick={() => handleDeleteRelation(rel.id)} className="p-2 text-[#555] hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                              <Trash2 size={14}/>
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+        {/* GRIDS SECTION - Stacked Vertically */}
+<div className="flex flex-col gap-8">
+  
+  {/* Columns Grid */}
+  <section className="bg-[#111] border border-[#222] rounded-[32px] overflow-hidden flex flex-col shadow-2xl min-h-[400px]">
+    <div className="p-6 border-b border-[#222] flex justify-between items-center bg-[#161616]/50">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500"><Columns size={18} /></div>
+        <h2 className="font-bold tracking-tight">Columns</h2>
+      </div>
+      <button 
+        onClick={() => setModalMode("column")} 
+        disabled={!selectedTableId} 
+        className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-xs font-bold rounded-xl hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        <Plus size={14} /> Add Column
+      </button>
+    </div>
+    
+    <div className="flex-1 overflow-auto">
+      {selectedTableId ? (
+        <table className="w-full text-left">
+          <thead className="bg-[#0f0f0f] text-[10px] uppercase tracking-widest text-[#444] font-bold">
+            <tr>
+              <th className="px-6 py-4">Name</th>
+              <th className="px-6 py-4">Type</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#222]">
+            {selectedTable?.columns?.map((col) => (
+              <tr key={col.id} className="group hover:bg-[#161616] transition-colors">
+                <td className="px-6 py-4 text-sm font-medium">
+                  {col.columnName}
+                  {col.isPrimaryKey && <span className="ml-2 text-[8px] text-yellow-500 border border-yellow-500/30 px-1 rounded uppercase font-bold">PK</span>}
+                </td>
+                <td className="px-6 py-4">
+                  <span className="text-[10px] bg-[#222] px-2 py-1 rounded text-[#888] font-mono border border-white/5">
+                    {col.dataType}{col.length ? `(${col.length})` : ''}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => handleEditColumn(col)} className="p-2 text-[#555] hover:text-white transition-colors"><Edit2 size={14}/></button>
+                    <button onClick={() => col.id && handleDeleteColumn(col.id)} className="p-2 text-[#555] hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="h-full flex flex-col items-center justify-center p-20 opacity-20">
+          <Columns size={48} strokeWidth={1}/>
+          <p className="text-[11px] font-bold mt-4 uppercase tracking-[0.3em]">Select a table to view columns</p>
         </div>
+      )}
+    </div>
+  </section>
+
+  {/* Relationships Grid */}
+  <section className="bg-[#111] border border-[#222] rounded-[32px] overflow-hidden flex flex-col shadow-2xl min-h-[400px]">
+    <div className="p-6 border-b border-[#222] flex justify-between items-center bg-[#161616]/50">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500"><Link2 size={18} /></div>
+        <h2 className="font-bold tracking-tight">Relationships</h2>
+      </div>
+      <button 
+        onClick={() => {
+          setRelationData(prev => ({ ...prev, sourceTableId: selectedTableId }));
+          setModalMode("relation");
+        }} 
+        disabled={!selectedTableId} 
+        className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 text-xs font-bold rounded-xl hover:bg-white/10 transition-all disabled:opacity-30"
+      >
+        <Plus size={14} /> Add Relation
+      </button>
+    </div>
+    
+    <div className="flex-1 overflow-auto">
+      {selectedTableId ? (
+        <table className="w-full text-left">
+          <thead className="bg-[#0f0f0f] text-[10px] uppercase tracking-widest text-[#444] font-bold">
+            <tr>
+              <th className="px-6 py-4">Source Table</th>
+              <th className="px-6 py-4">Source Column</th>
+              <th className="px-6 py-4">Target Table</th>
+              <th className="px-6 py-4">Target Column</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#222]">
+            {relationships.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center py-20 text-[#444]">
+                   <div className="flex flex-col items-center gap-2 opacity-40">
+                      <Link2 size={32} strokeWidth={1} />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">No relationships defined for this table</p>
+                   </div>
+                </td>
+              </tr>
+            ) : (
+              relationships.map((rel: any) => (
+                <tr key={rel.id} className="group hover:bg-[#161616] transition-colors">
+                  <td className="px-6 py-4 text-sm text-white font-medium">{rel.sourceTable}</td>
+                  <td className="px-6 py-4">
+                    <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded font-mono">
+                      {rel.sourceColumn}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-white font-medium">{rel.targetTable}</td>
+                  <td className="px-6 py-4">
+                    <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-1 rounded font-mono">
+                      {rel.targetColumn}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button onClick={() => handleDeleteRelation(rel.id)} className="p-2 text-[#555] hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                        <Trash2 size={14}/>
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      ) : (
+        <div className="h-full flex flex-col items-center justify-center p-20 opacity-20">
+          <Link2 size={48} strokeWidth={1}/>
+          <p className="text-[11px] font-bold mt-4 uppercase tracking-[0.3em]">Select a table to view relationships</p>
+        </div>
+      )}
+    </div>
+  </section>
+</div>
       </div>
 
       {/* POPUP MODAL SYSTEM */}
